@@ -130,7 +130,7 @@
                 <p><strong>trotate90*z</strong> - Rotate top layer (e.g. trotate90*2)</p>
                 <p><strong>brotate90*z</strong> - Rotate bottom layer</p>
                 <p><strong>next</strong> - Cycle to next piece</p>
-                <p><strong>quit</strong> - End game and show solution</p>
+                <p><strong>quit</strong> - End game</p>
                 <p id="piece-count">Pieces remaining: </p>
             </div>
         </div>
@@ -202,9 +202,17 @@ function generateGrid() {
     return newGrid;
 }
 
+function shuffleArray(array) {
+    for (let i = array.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [array[i], array[j]] = [array[j], array[i]];
+    }
+}
+
 // Piece Generation
 function generatePieces() {
     const letters = 'abcdefghijklmnopqrstuvwxyz'.split('').map(c => c + c);
+    shuffleArray(letters);
     const pieces = [];
 
     // Initialize solution grids
@@ -519,6 +527,7 @@ function initGame() {
     
     // Initialize gameplay state
     playablePieces = [...gamePieces];
+    shuffleArray(playablePieces);
     currentPiece = playablePieces[0];
     topGrid = generateGrid();  // Empty play grid
     bottomGrid = generateGrid();
