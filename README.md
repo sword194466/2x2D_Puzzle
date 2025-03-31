@@ -1,4 +1,5 @@
 # 2x2D_Puzzle
+## Generation logic
 The puzzle generation process is the following (consider one of the layers):
 1. generate base grid:
 
@@ -25,7 +26,14 @@ The puzzle generation process is the following (consider one of the layers):
 9. randomize the generated puzzle array again
 
 
+## Execution (without download)
+1. select the HTML game file and click on <raw>
 
+![image](https://github.com/user-attachments/assets/1de28854-9ed1-4f78-a492-f179348a4be3)
 
+2. replace <raw.githubusercontent.com> to <raw.githack.com> and the game should be running
+   
+   ![image](https://github.com/user-attachments/assets/1bbd7b85-a73f-48ae-9145-71cdc6e403aa)
 
-
+## Execution (download)
+1. download the HTML file and execute
