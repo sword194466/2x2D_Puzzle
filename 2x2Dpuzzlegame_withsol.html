@@ -1,0 +1,548 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>2-Layer Responsive Puzzle</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <style>
+        :root {
+            --cell-size: 2vmin;
+            --panel-width: 30vmax;
+        }
+
+        body {
+            font-family: Arial, sans-serif;
+            background: #1a1a1a;
+            color: #fff;
+            margin: 1vmin;
+            overflow: hidden;
+        }
+
+        .game-container {
+            display: grid;
+            grid-template-columns: auto var(--panel-width);
+            gap: 2vmin;
+            height: 98vh;
+        }
+
+        .puzzle-grid {
+            display: grid;
+            grid-template-columns: repeat(32, var(--cell-size));
+            grid-template-rows: repeat(17, var(--cell-size));
+            gap: 0.5vmin;
+            background: #333;
+            padding: 0.5vmin;
+            margin-bottom: 1vmin;
+        }
+
+        .cell {
+            width: var(--cell-size);
+            height: var(--cell-size);
+            font-size: calc(var(--cell-size) * 0.5);
+            text-align: center;
+            border: 1px solid #444;
+            line-height: var(--cell-size);
+            overflow: hidden;
+        }
+
+        .instructions {
+            padding: 1.5vmin;
+            background: #2a2a2a;
+            border-radius: 1vmin;
+            margin-top: 1vmin;
+            font-size: 1.5vmin;
+        }
+
+        input {
+            width: 100%;
+            padding: 1vmin;
+            margin: 1vmin 0;
+            background: #333;
+            color: #fff;
+            border: 1px solid #666;
+            border-radius: 0.5vmin;
+            font-size: 2vmin;
+        }
+
+        #status {
+            color: #ff4444;
+            min-height: 2vmin;
+            margin: 1vmin 0;
+            font-size: 2vmin;
+        }
+
+        .piece-preview {
+            display: flex;
+            gap: 2vmin;
+            margin: 2vmin 0;
+        }
+
+        .layer-preview {
+            display: grid;
+            grid-template-columns: repeat(7, var(--cell-size));
+            gap: 0.5vmin;
+            border: 2px solid #444;
+            padding: 0.5vmin;
+        }
+
+        .grid-label {
+            margin-bottom: 1vmin;
+            color: #888;
+            font-size: 2vmin;
+        }
+
+        @media (orientation: portrait) {
+            .game-container {
+                grid-template-columns: 1fr;
+                grid-template-rows: auto auto;
+            }
+            
+            .puzzle-grid {
+                grid-template-columns: repeat(32, 2vmin);
+                grid-template-rows: repeat(17, 2vmin);
+            }
+            
+            :root {
+                --cell-size: 2vmin;
+                --panel-width: 100%;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="game-container">
+        <div>
+            <div class="grid-label">Top Layer</div>
+            <div id="top-grid" class="puzzle-grid"></div>
+            <div class="grid-label">Bottom Layer</div>
+            <div id="bottom-grid" class="puzzle-grid"></div>
+        </div>
+        <div class="ui-panel">
+            <h3>Current Piece:</h3>
+            <div id="current-piece" class="piece-preview"></div>
+            <input type="text" id="command" placeholder="Enter command...">
+            <div id="status"></div>
+            <div class="instructions">
+                <h3>Instructions</h3>
+                <p>(Use center of 7x7 piece as reference point)</p>
+                <p><strong>place[x,y]</strong> - Place piece at coordinates</p>
+                <p><strong>fliph</strong> - Flip horizontally (layers will swap)</p>
+                <p><strong>flipv</strong> - Flip vertically (layers will swap)</p>
+                <p><strong>trotate90*z</strong> - Rotate top layer (e.g. trotate90*2)</p>
+                <p><strong>brotate90*z</strong> - Rotate bottom layer</p>
+                <p><strong>next</strong> - Cycle to next piece</p>
+                <p><strong>quit</strong> - End game</p>
+                <p id="piece-count">Pieces remaining: </p>
+            </div>
+        </div>
+    </div>
+
+<script>
+// Game State
+let topGrid = [];
+let bottomGrid = [];
+let playablePieces = [];
+let currentPiece = null;
+let gameRunning = true;
+let topSolution = null;
+let bottomSolution = null;
+
+// Helper Functions
+function create2DArray(w, h, val) {
+    return Array(h).fill().map(() => Array(w).fill(val));
+}
+
+function rotate90(matrix, times) {
+    times = times % 4;
+    for(let t = 0; t < times; t++) {
+        matrix = matrix[0].map((_, i) =>
+            matrix.map(row => row[row.length-1-i])
+        );
+    }
+    return matrix;
+}
+
+function flipHorizontal(matrix) {
+    return matrix.map(row => [...row].reverse());
+}
+
+function flipVertical(matrix) {
+    return [...matrix].reverse();
+}
+
+function updatePieceCount() {
+    document.getElementById('piece-count').textContent = 
+        `Pieces remaining: ${playablePieces.length}`;
+}
+
+function deepCopyGrid(grid) {
+    return grid.map(row => [...row]);
+}
+
+// Grid Generation
+function generateGrid() {
+    const width = 32, height = 17;
+    let newGrid = [];
+    
+    for(let i = 0; i < height; i++) {
+        let row = [];
+        if(i < 2 || i >= height - 1) {
+            if(i === 0) {
+                row = Array.from({length: width}, (_, j) => 
+                    j.toString().padStart(2, '0'));
+            } else {
+                row = [i.toString().padStart(2, '0'), 
+                      ...Array(width-1).fill('--')];
+            }
+        } else {
+            row = [i.toString().padStart(2, '0'), '--', 
+                   ...Array(width-4).fill('||'), '--', '--'];
+        }
+        newGrid.push(row);
+    }
+    return newGrid;
+}
+
+function shuffleArray(array) {
+    for (let i = array.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [array[i], array[j]] = [array[j], array[i]];
+    }
+}
+
+// Piece Generation
+function generatePieces() {
+    const letters = 'abcdefghijklmnopqrstuvwxyz'.split('').map(c => c + c);
+    shuffleArray(letters);
+    const pieces = [];
+
+    // Initialize solution grids
+    const top_sol = generateGrid();
+    const bottom_sol = generateGrid();
+
+    // Helper function to pad layers
+    const padLayer = (layer, targetSize) => {
+        const padded = Array.from({length: targetSize}, () => 
+            Array(targetSize).fill('||'));
+        const offset = Math.floor((targetSize - layer.length) / 2);
+        
+        layer.forEach((row, i) => {
+            row.forEach((cell, j) => {
+                padded[i + offset][j + offset] = cell;
+            });
+        });
+        return padded;
+    };
+
+    const centers_init = [
+        [3, 3], [8, 3], [13, 3], [18, 3], [23, 3], [28, 3],
+        [3, 8], [8, 8], [13, 8], [18, 8], [23, 8], [28, 8],
+        [3, 13], [8, 13], [13, 13], [18, 13], [23, 13], [28, 13]
+    ];
+    centers_init.forEach(([center_col, center_row], i) => {
+        const piece = {
+            top: create2DArray(5, 5, '||'),
+            bottom: create2DArray(5, 5, '||')
+        };
+        // Process top layer
+        for (let row = center_row - 2; row <= center_row + 2; row++) {
+            for (let col = center_col - 2; col <= center_col + 2; col++) {
+                if (top_sol[row][col] === '||' && Math.random() < 0.5) {
+                    top_sol[row][col] = letters[i];
+                    piece.top[row - (center_row - 2)][col - (center_col - 2)] = letters[i];
+                }
+            }
+        }
+        // Process bottom layer
+        for (let row = center_row - 2; row <= center_row + 2; row++) {
+            for (let col = center_col - 2; col <= center_col + 2; col++) {
+                if (bottom_sol[row][col] === '||' && Math.random() < 0.5) {
+                    bottom_sol[row][col] = letters[i];
+                    piece.bottom[row - (center_row - 2)][col - (center_col - 2)] = letters[i];
+                }
+            }
+        }
+        // Pad to 7x7
+        pieces.push({
+            top: padLayer(piece.top, 7),
+            bottom: padLayer(piece.bottom, 7),
+            letter: letters[i]
+        }); // these pieces are 5x5 padded to 7x7
+    });
+
+    num_init_pieces = pieces.length; // 18 pieces
+
+    const centers_foll = [
+        [5, 5], [12, 5], [19, 5], [26, 5],
+        [5, 12], [12, 12], [19, 12], [26, 12]
+    ];
+    centers_foll.forEach(([center_col, center_row], i) => {
+        const piece = {
+            top: create2DArray(7, 7, '||'),
+            bottom: create2DArray(7, 7, '||'),
+            letter: letters[num_init_pieces + i]
+        };
+        // Process top layer
+        for (let row = center_row - 3; row <= center_row + 3; row++) {
+            for (let col = center_col - 3; col <= center_col + 3; col++) {
+                if (top_sol[row][col] === '||') {
+                    top_sol[row][col] = piece.letter;
+                    piece.top[row - (center_row - 3)][col - (center_col - 3)] = piece.letter;
+                }
+            }
+        }
+        // Process bottom layer
+        for (let row = center_row - 3; row <= center_row + 3; row++) {
+            for (let col = center_col - 3; col <= center_col + 3; col++) {
+                if (bottom_sol[row][col] === '||') {
+                    bottom_sol[row][col] = piece.letter;
+                    piece.bottom[row - (center_row - 3)][col - (center_col - 3)] = piece.letter;
+                }
+            }
+        }
+        pieces.push(piece); // these pieces are 7x7
+    });
+    // Return the padded pieces, top_sol, and bottom_sol
+    return { pieces, top_sol, bottom_sol };
+}
+
+function applyRandomTransformations(pieces) {
+    return pieces.map(piece => ({
+        ...piece,  // Preserve the letter and other properties
+        top: transformLayer(piece.top),
+        bottom: transformLayer(piece.bottom)
+    }));
+}
+
+function transformLayer(layer) {
+    let transformed = JSON.parse(JSON.stringify(layer));
+    transformed = rotate90(transformed, Math.floor(Math.random() * 4));
+    if(Math.random() < 0.5) transformed = flipHorizontal(transformed);
+    if(Math.random() < 0.5) transformed = flipVertical(transformed);
+    return transformed;
+}
+
+// Game Logic
+function placePiece(x, y) {
+    if(!currentPiece) return false;
+    
+    const startX = x - 3;
+    const startY = y - 3;
+    let valid = true;
+
+    valid &= checkLayerPlacement(topGrid, currentPiece.top, startX, startY);
+    valid &= checkLayerPlacement(bottomGrid, currentPiece.bottom, startX, startY);
+
+    if(!valid) return false;
+
+    applyLayerPlacement(topGrid, currentPiece.top, startX, startY);
+    applyLayerPlacement(bottomGrid, currentPiece.bottom, startX, startY);
+
+    playablePieces.shift();
+    updatePieceCount();
+    
+    if(playablePieces.length > 0) {
+        currentPiece = playablePieces[0];
+        setStatus('Piece placed successfully!');
+    } else {
+        setStatus('No more pieces!');
+        gameRunning = false;
+    }
+    return true;
+}
+
+function checkLayerPlacement(grid, piece, startX, startY) {
+    for(let y = 0; y < 7; y++) {
+        for(let x = 0; x < 7; x++) {
+            const cell = piece[y][x];
+            if(cell === '||') continue;
+
+            const gridX = startX + x;
+            const gridY = startY + y;
+
+            if(gridX < 2 || gridX >= 30 || gridY < 2 || gridY >= 15) {
+                setStatus('Error: Out of bounds!', true);
+                return false;
+            }
+
+            if(grid[gridY][gridX] !== '||') {
+                setStatus(`Collision at (${gridX}, ${gridY})!`, true);
+                return false;
+            }
+        }
+    }
+    return true;
+}
+
+function applyLayerPlacement(grid, piece, startX, startY) {
+    for(let y = 0; y < 7; y++) {
+        for(let x = 0; x < 7; x++) {
+            const cell = piece[y][x];
+            if(cell === '||') continue;
+            grid[startY + y][startX + x] = cell;
+        }
+    }
+}
+
+// Rendering
+function renderGrid(gridId, grid) {
+    const container = document.getElementById(gridId);
+    container.innerHTML = '';
+    
+    grid.forEach((row, y) => {
+        row.forEach((cell, x) => {
+            const div = document.createElement('div');
+            div.className = 'cell';
+            div.textContent = cell;
+            div.style.background = getCellColor(cell);
+            container.appendChild(div);
+        });
+    });
+}
+
+function renderCurrentPiece() {
+    const container = document.getElementById('current-piece');
+    container.innerHTML = '';
+    
+    if(currentPiece) {
+        ['top', 'bottom'].forEach(layer => {
+            const preview = document.createElement('div');
+            preview.className = 'layer-preview';
+            currentPiece[layer].forEach(row => {
+                row.forEach(cell => {
+                    const div = document.createElement('div');
+                    div.className = 'cell';
+                    div.textContent = cell;
+                    div.style.background = getCellColor(cell);
+                    preview.appendChild(div);
+                });
+            });
+            container.appendChild(preview);
+        });
+    }
+}
+
+function getCellColor(cell) {
+    if(cell === '--') return '#444';
+    if(cell === '||') return '#222';
+    if(cell.match(/[a-z]{2}/)) {
+        const hue = (cell.charCodeAt(0) - 97) * 15;
+        return `hsl(${hue}, 50%, 30%)`;
+    }
+    return '#333';
+}
+
+function setStatus(message, isError = false) {
+    const status = document.getElementById('status');
+    status.textContent = message;
+    status.style.color = isError ? '#ff4444' : '#44ff44';
+    if(!isError) setTimeout(() => status.textContent = '', 2000);
+}
+
+// Event Handling
+document.getElementById('command').addEventListener('keypress', (e) => {
+    if(e.key === 'Enter') {
+        const command = e.target.value.trim().toLowerCase();
+        e.target.value = '';
+        
+        try {
+            if(command === 'fliph') {
+                const newTop = flipHorizontal(currentPiece.bottom);
+                const newBottom = flipHorizontal(currentPiece.top);
+                currentPiece = { top: newTop, bottom: newBottom };
+            } 
+            else if(command === 'flipv') {
+                const newTop = flipVertical(currentPiece.bottom);
+                const newBottom = flipVertical(currentPiece.top);
+                currentPiece = { top: newTop, bottom: newBottom };
+            }
+            else if(command.startsWith('trotate90*') || command.startsWith('brotate90*')) {
+                const [prefix, times] = command.split('*');
+                const layer = prefix[0] === 't' ? 'top' : 'bottom';
+                const rotations = parseInt(times) % 4;
+                currentPiece[layer] = rotate90(currentPiece[layer], rotations);
+            }
+            else if(command.startsWith('place')) {
+                const coords = command.match(/\d+/g);
+                if(coords && coords.length === 2) {
+                    const x = parseInt(coords[0]);
+                    const y = parseInt(coords[1]);
+                    if(placePiece(x, y)) gameLoop();
+                }
+            }
+            else if(command === 'next') {
+                if(playablePieces.length > 1) {
+                    playablePieces.push(playablePieces.shift());
+                    currentPiece = playablePieces[0];
+                    updatePieceCount();
+                }
+            }
+            else if(command === 'quit') {
+                gameRunning = false;
+                topGrid = deepCopyGrid(topSolution);
+                bottomGrid = deepCopyGrid(bottomSolution);
+                gameLoop();
+            }
+        } catch(err) {
+            setStatus('Invalid command!', true);
+        }
+        
+        gameLoop();
+    }
+});
+
+// Game Loop
+function gameLoop() {
+    if(!gameRunning) {
+        setStatus('Game Over!');
+        // Don't return here - we still need to render the final state
+    }
+    
+    if(gameRunning) { // Only check win condition if game is still going
+        if([topGrid, bottomGrid].every(grid => 
+            grid.slice(2,15).every(row => 
+                row.slice(2,30).every(cell => cell !== '||')
+        ))) {
+            setStatus('YOU WIN!', true);
+            gameRunning = false;
+        }
+    }
+
+    // Always render regardless of game state
+    renderGrid('top-grid', topGrid);
+    renderGrid('bottom-grid', bottomGrid);
+    renderCurrentPiece();
+}
+
+// Initialize Game
+function initGame() {
+    // Generate base pieces and solutions
+    const { pieces, top_sol, bottom_sol } = generatePieces();
+    
+    // Store original solutions
+    topSolution = deepCopyGrid(top_sol);
+    bottomSolution = deepCopyGrid(bottom_sol);
+    
+    // Apply transformations and store
+    gamePieces = applyRandomTransformations(pieces);
+    
+    // Initialize gameplay state
+    playablePieces = [...gamePieces];
+    shuffleArray(playablePieces);
+    currentPiece = playablePieces[0];
+    topGrid = generateGrid();  // Empty play grid
+    bottomGrid = generateGrid();
+    
+    updatePieceCount();
+    gameLoop();
+}
+
+// Start the game
+initGame();
+
+// Handle window resize
+window.addEventListener('resize', () => {
+    gameLoop();
+});
+</script>
+</body>
+</html> 
